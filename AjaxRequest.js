@@ -1,6 +1,7 @@
 function AjaxRequest() {
 	this.ajaxObject = null; // used to simplify fallthrough detection.
 	this.iframeObject = null;
+	this.iframeSrc = "";
 	this.msxml1Obj = null;
 	this.msxml2Obj = null;
 	this.msxml3Obj = null;
@@ -9,6 +10,11 @@ function AjaxRequest() {
 	this.iframePollCallbackName = null;
 	this.iframePrepXHRPollCallbackName = null;
 	this.initializing = true;
+	this.headparams = null;
+	this.uriparameters = null;
+	this.bodyparameters = null;
+	this.url = null;
+	this.method = null;
 	AjaxRequest.objIdx++;
 	
 	// IE 4 doesn't have async or await because... IE... so using this kludge instead...
@@ -17,13 +23,13 @@ function AjaxRequest() {
 	window[this.initizingCallbackName] = (function(self) { 
 		return function() {
 			if(AjaxRequest.initializing) {
-				window.setTimeout(self.initizingCallbackName + "();", 100);
+				window.setTimeout(self.initizingCallbackName + "();", 2000);
 			} else {
 				self.finishInitInstance();
 			}
 		};
 	})(this);
-	window.setTimeout(this.initizingCallbackName + "();", 100);
+	window.setTimeout(this.initizingCallbackName + "();", 2000);
 }
 
 if(!Object.keys) {
@@ -213,6 +219,17 @@ AjaxRequest.getChildById = function(elem, id)
 				}
 			}
 		}
+		else if(elem.childNodes)
+		{
+			for (var i = 0; i < elem.childNodes.length; i++) {
+				var iterRet = AjaxRequest.getChildById(elem.childNodes[i], id);
+				
+				if(iterRet)
+				{
+					return iterRet;
+				}
+			}
+		}
 	}
 	
 	return null;
@@ -237,6 +254,17 @@ AjaxRequest.getChildByTag = function(elem, tag)
 				}
 			}
 		}
+		else if(elem.childNodes)
+		{
+			for (var i = 0; i < elem.childNodes.length; i++) {
+				var iterRet = AjaxRequest.getChildByTag(elem.childNodes[i], tag);
+				
+				if(iterRet)
+				{
+					return iterRet;
+				}
+			}
+		}
 	}
 	
 	return null;
@@ -250,7 +278,36 @@ AjaxRequest.bindEvent = function (element, type, handler) {
    } else {
 	   element['on'+type] = handler;
    }
-}
+};
+
+AjaxRequest.getIframeBody = function(iframe) {
+		var iframeDoc = null;
+		// on IE 4, there is no contentWindow or contentDocument, so frames must be iterated instead.
+		if (window && window.frames) {
+			var frames = window.frames;
+			if(frames)
+			{
+				var frame = frames[iframe.id];
+				if(frame)
+				{
+					iframeDoc = frame;
+				}
+			}
+		}
+		if(!iframeDoc) {
+			if(iframe.contentDocument) {
+				iframeDoc = iframe.contentDocument
+			} else if(iframe.contentWindow) {
+				iframeDoc = iframe.contentWindow;
+			} 
+		}
+		if(iframeDoc && iframeDoc.document) {
+			iframeDoc = iframeDoc.document
+		} else if(!iframeDoc && iframe.document) {
+			iframeDoc = iframe.document;
+		}
+		return iframeDoc;
+};
 
 AjaxRequest.objIdx = 0;
 AjaxRequest.iframeIdx = 0;
@@ -262,6 +319,12 @@ AjaxRequest.hasmsxml1a = false;
 AjaxRequest.hasmsxml2 = false;
 AjaxRequest.hasmsxml3 = false;
 AjaxRequest.hasxmlhttprequest = false;
+AjaxRequest.hasiframe = false;
+AjaxRequest.iframesupportsjavascriptvoidfunc = false;
+AjaxRequest.numiframesupportsjavascriptvoidfunctest = 0;
+AjaxRequest.hasReadyState = false;
+AjaxRequest.hasiframesupportsjavascriptloaded = false;
+AjaxRequest.testiframe = null;
 
 AjaxRequest.html_attributes = [
 	"accept",
@@ -507,7 +570,7 @@ AjaxRequest.prototype.finishInitInstance = function() {
 			window[this.msxml1PollCallbackName] = (function(self, httprequest, fName) { 
 				return function () { 
 					if(httprequest.readyState < 4) {
-						window.setTimeout(fName + "();", 1000);
+						window.setTimeout(fName + "();", 2000);
 					} else {
 						self.msxml1Callback();
 					}
@@ -516,7 +579,7 @@ AjaxRequest.prototype.finishInitInstance = function() {
 			this.msxmlCallback = null;
 		//} catch(ex) {
 		//}
-	} else {
+	} else if(AjaxRequest.hasiframe) {
 		var iframe = null;
 		
 		// in IE 8-11 a hack must be applied to allow contentDocument to be visible -- hence complicated src
@@ -534,42 +597,58 @@ AjaxRequest.prototype.finishInitInstance = function() {
 			
 			document.body.appendChild(iframe);
 		} else {*/
-			document.body.innerHTML += "\n" + '<iframe id="' + 'ajax_helper_' + AjaxRequest.iframeIdx.toString() + '" ' + 
-											'name="' + 'ajax_helper_' + AjaxRequest.iframeIdx.toString() + '" ' +
-											'hidden="true" style="display: none;" src=' + "'" +
-													'javascript:void((function(){var script = document.createElement("script");' +
-													'script.innerHTML = "(function() {' +
-													'document.open();document.domain=\\\"' + document.domain +
-													'\\\";document.close();})();";' +
-													'document.write("<head>" + script.outerHTML + "</head><body></body>");})())'											
-												+ "'" + '>' +
-											'</iframe>';
-											
-			iframe = AjaxRequest.getChildById(document.body, 'ajax_helper_' + AjaxRequest.iframeIdx.toString());
+			if(AjaxRequest.iframesupportsjavascriptvoidfunc) {
+				document.body.innerHTML += "\n" + '<iframe id="' + 'ajax_helper_' + AjaxRequest.iframeIdx.toString() + '" ' + 
+												'name="' + 'ajax_helper_' + AjaxRequest.iframeIdx.toString() + '" ' +
+												'hidden="true" style="display: none;">' +
+												'</iframe>';
+				iframe = AjaxRequest.getChildById(document.body, 'ajax_helper_' + AjaxRequest.iframeIdx.toString());
+				iframe.src = 'javascript:void(' + 
+									'(function(){' + 
+										'var script = "' + 
+											'<script language=\\"javascript\\">' +
+												'(function() {' +
+													'document.open();' +
+													'document.domain=\\"' + document.domain + '\\";' +
+													'document.close();' + 
+												'})();' +
+											'<" + "' + "/" + '" + "script>' +
+										'";' +
+										'if(document) {' +
+											'document.write("' +
+												'<head>" + script + "</head>' + 
+												'<body>' + 
+												'</body>' +
+											'");' + 
+										'}' +
+									'})()' + 
+								')';
+			} else {
+				document.body.innerHTML += "\n" + '<iframe id="' + 'ajax_helper_' + AjaxRequest.iframeIdx.toString() + '_" ' + 
+												'name="' + 'ajax_helper_' + AjaxRequest.iframeIdx.toString() + '" ' +
+												'hidden="true" style="display: none;" src="about:blank">' +
+												'</iframe>';
+				document.body.innerHTML += "\n" + '<iframe id="' + 'ajax_helper_' + AjaxRequest.iframeIdx.toString() + '" ' + 
+												'name="' + 'ajax_helper_' + AjaxRequest.iframeIdx.toString() + '" ' +
+												'hidden="true" style="display: none;" src="about:blank">' +
+												'</iframe>';
+				iframe = AjaxRequest.getChildById(document.body, 'ajax_helper_' + AjaxRequest.iframeIdx.toString());
+			}
 		//}
 
 		this.iframeObject = iframe;
+		this.iframeSrc = "";
 		this.ajaxObject = this.iframeObject;
 		this.iframeLoadCallback = (function(self) {
 			return function(obj) {
-				var iframeDoc = (obj.contentWindow || obj.contentDocument);
-				if (iframeDoc && iframeDoc.document)
-				{
-					iframeDoc = iframeDoc.document;
-				}
-				// on IE 4, there is no contentWindow or contentDocument, so frames must be iterated instead.
-				if (!iframeDoc) {
-					var frames = window.frames;
-					var frame = frames[obj.id];
-					iframeDoc = frame.document;
-				}
+				var iframeDoc = AjaxRequest.getIframeBody(AjaxRequest.getChildById(document.body, obj.id));
 				if(iframeDoc) {
 					var iframeBody = iframeDoc.body;
 					if(iframeBody) {
 						var html = iframeBody.innerHTML;
 						html = he.decode(html);
 						html = html.replace(/^[ \t]*[<]pre style=["][^\"]*["][>]/i, "");
-						html = html.replace(/[<][/]pre[>][ \t]*$/i, "");
+						html = html.replace(/[<]\/pre[>][ \t]*$/i, "");
 						self.iFrameCallback(html);
 					}
 				}
@@ -580,16 +659,19 @@ AjaxRequest.prototype.finishInitInstance = function() {
 		// TODO: add onerror to handle error.
 		window[this.iframePollCallbackName] = (function(self, iframeObject, fName) { 
 			return function () {
-				var iframe = document.getElementById(iframeObject.id);
-				var iframeDoc = (iframe.contentWindow || iframe.contentDocument);
-				if (iframeDoc && iframeDoc.document)
-					iframeDoc = iframeDoc.document;
-				if(!iframeDoc) 
-					iframeDoc = iframe;
-				if(iframeDoc && iframeDoc.readyState && iframeDoc.readyState != 'complete' && iframeDoc.readyState != 4) {
-					window.setTimeout(fName + "();", 1000);
+				var iframeDoc = AjaxRequest.getIframeBody(AjaxRequest.getChildById(document.body, iframeObject.id));
+				if(AjaxRequest.hasReadyState) {
+					if(!iframeDoc || !iframeDoc.readyState || (iframeDoc && iframeDoc.readyState && iframeDoc.readyState != 'complete'/* && iframeDoc.readyState != 'interactive'*/ && iframeDoc.readyState != 4)) {
+						window.setTimeout(fName + "();", 2000);
+					} else {
+						self.iframeLoadCallback(iframeObject);
+					}
 				} else {
-					self.iframeLoadCallback(iframe);
+					if(!iframeDoc || !iframeDoc.location || !iframeDoc.location.href || iframeDoc.location.href === "about:blank" ||!iframeDoc.body) {
+						window.setTimeout(fName + "();", 2000);
+					} else {
+						self.iframeLoadCallback(iframeObject);
+					}
 				}
 			}; 
 		})(this, this.iframeObject, this.iframePollCallbackName );
@@ -598,20 +680,209 @@ AjaxRequest.prototype.finishInitInstance = function() {
 		// TODO: add onerror to handle error.
 		window[this.iframePrepXHRPollCallbackName] = (function(self, iframeObject, fName) { 
 			return function () {
-				var iframe = document.getElementById(iframeObject.id);
-				var iframeDoc = (iframe.contentWindow || iframe.contentDocument);
-				if (iframeDoc && iframeDoc.document)
-					iframeDoc = iframeDoc.document;
-				if(!iframeDoc) 
-					iframeDoc = iframe;
-				if(iframeDoc && iframeDoc.readyState && iframeDoc.readyState != 'complete' && iframeDoc.readyState != 4) {
-					window.setTimeout(fName + "();", 1000);
+				var iframeDoc = AjaxRequest.getIframeBody(AjaxRequest.getChildById(document.body, iframeObject.id));
+				if(AjaxRequest.hasReadyState) {
+					if(!iframeDoc || !iframeDoc.readyState || (iframeDoc && iframeDoc.readyState && iframeDoc.readyState != 'complete'/* && iframeDoc.readyState != 'interactive'*/ && iframeDoc.readyState != 4)) {
+						window.setTimeout(fName + "();", 2000);
+					} else {
+						var iframeBody = iframeDoc.body;
+						var form = (iframeBody) ? AjaxRequest.getChildByTag(iframeBody, "form") : null;
+						//self.iframeLoadCallback(iframe);
+						if(!form) {
+							// netscape 6 doesn't define document in src=javascript:void(), so attempts to create there will be undefined.
+							// but DOES allow us to inject content directly, so if we don't  have a form this is probably the case.
+							
+							//if(iframeDoc.documentElement) {
+							//	iframeDoc.documentElement.innerHTML = (self.iframeSrc);
+							//} else {
+								iframeDoc.open();
+								iframeDoc.write(self.iframeSrc);
+								iframeDoc.close();
+							//}
+							
+							iframeBody = iframeDoc.body;
+							form = (iframeBody) ? AjaxRequest.getChildByTag(iframeBody, "form") : null;
+							
+							// netscape 6 doesn't update dom after document write or innerHTML update, so if the above failed, then we need to manually insert.
+							if(!form) {
+								iframeDoc.close();
+								iframeDoc.open();
+								iframeDoc.close();
+								
+								var head = iframeDoc.createElement("head");
+								if(iframeDoc.documentElement) {
+									iframeDoc.documentElement.appendChild(head);
+								} else {
+									iframeDoc.appendChild(head);
+								}
+								var body = iframeDoc.createElement("body");
+								if(iframeDoc.documentElement) {
+									iframeDoc.documentElement.appendChild(body);
+								} else {
+									iframeDoc.appendChild(body);
+								}
+								
+								if(self.headparams) {
+									var keys = Object.keys(self.headparams);
+									for(var ki = 0; ki < keys.length; ki++)
+									{
+										var key = keys[ki];
+										var value = self.headparams[key];
+										
+										var meta = iframeDoc.createElement("meta");
+										meta.httpEquiv = key.toString();
+										meta.content = value.toString();
+										
+										head.appendChild(meta);
+									}
+								}
+								
+								var formmethod="get";
+								if(self.method.toLowerCase() == "put" || self.method.toLowerCase() == "post" || self.method.toLowerCase() == "patch") {
+									 formmethod="post";
+								}
+								form = iframeDoc.createElement("form");
+								form.action=self.url;
+								form.method=formmethod;
+								//form.target=iframeObject.id;
+								form.target="_self";
+								
+								body.appendChild(form);
+								
+								if(self.uriparameters) {
+									var keys = Object.keys(self.uriparameters);
+									for(var ki = 0; ki < keys.length; ki++)
+									{
+										var key = keys[ki];
+										var value = self.uriparameters[key];
+										
+										var input = iframeDoc.createElement("input");
+										input.type = "hidden";
+										input.name = key.toString();
+										input.value = value.toString();
+										form.appendChild(input);
+									}
+								}
+								if(self.bodyparameters) {
+									var keys = Object.keys(self.bodyparameters);
+									for(var ki = 0; ki < keys.length; ki++)
+									{
+										var key = keys[ki];
+										var value = self.bodyparameters[key];
+										
+										var input = iframeDoc.createElement("input");
+										input.type = "hidden";
+										input.name = key.toString();
+										input.value = value.toString();
+										form.appendChild(input);
+									}
+								}
+							}
+						}
+						window.setTimeout(self.iframePollCallbackName + "();", 2000);
+						form.submit();
+					}
 				} else {
-					var iframeBody = iframeDoc.body;
-					var form = AjaxRequest.getChildByTag(iframeBody, "form");
-					//self.iframeLoadCallback(iframe);
-					window.setTimeout(self.iframePollCallbackName + "();", 1000);
-					form.submit();
+					if(!iframeDoc || !iframeDoc.body) {
+						window.setTimeout(fName + "();", 2000);
+					} else {
+						var iframeBody = iframeDoc.body;
+						var form = (iframeBody) ? AjaxRequest.getChildByTag(iframeBody, "form") : null;
+						//self.iframeLoadCallback(iframe);
+						if(!form) {
+							// netscape 6 doesn't define document in src=javascript:void(), so attempts to create there will be undefined.
+							// but DOES allow us to inject content directly, so if we don't  have a form this is probably the case.
+							
+							//if(iframeDoc.documentElement) {
+							//	iframeDoc.documentElement.innerHTML = (self.iframeSrc);
+							//} else {
+								iframeDoc.open();
+								iframeDoc.write(self.iframeSrc);
+								iframeDoc.close();
+							//}
+							
+							iframeBody = iframeDoc.body;
+							form = (iframeBody) ? AjaxRequest.getChildByTag(iframeBody, "form") : null;
+							
+							// netscape 6 doesn't update dom after document write or innerHTML update, so if the above failed, then we need to manually insert.
+							if(!form) {
+								iframeDoc.close();
+								iframeDoc.open();
+								iframeDoc.close();
+								
+								var head = iframeDoc.createElement("head");
+								if(iframeDoc.documentElement) {
+									iframeDoc.documentElement.appendChild(head);
+								} else {
+									iframeDoc.appendChild(head);
+								}
+								var body = iframeDoc.createElement("body");
+								if(iframeDoc.documentElement) {
+									iframeDoc.documentElement.appendChild(body);
+								} else {
+									iframeDoc.appendChild(body);
+								}
+								
+								if(self.headparams) {
+									var keys = Object.keys(self.headparams);
+									for(var ki = 0; ki < keys.length; ki++)
+									{
+										var key = keys[ki];
+										var value = self.headparams[key];
+										
+										var meta = iframeDoc.createElement("meta");
+										meta.httpEquiv = key.toString();
+										meta.content = value.toString();
+										
+										head.appendChild(meta);
+									}
+								}
+								
+								var formmethod="get";
+								if(self.method.toLowerCase() == "put" || self.method.toLowerCase() == "post" || self.method.toLowerCase() == "patch") {
+									 formmethod="post";
+								}
+								form = iframeDoc.createElement("form");
+								form.action=self.url;
+								form.method=formmethod;
+								//form.target=iframeObject.id;
+								form.target="_self";
+								
+								body.appendChild(form);
+								
+								if(self.uriparameters) {
+									var keys = Object.keys(self.uriparameters);
+									for(var ki = 0; ki < keys.length; ki++)
+									{
+										var key = keys[ki];
+										var value = self.uriparameters[key];
+										
+										var input = iframeDoc.createElement("input");
+										input.type = "hidden";
+										input.name = key.toString();
+										input.value = value.toString();
+										form.appendChild(input);
+									}
+								}
+								if(self.bodyparameters) {
+									var keys = Object.keys(self.bodyparameters);
+									for(var ki = 0; ki < keys.length; ki++)
+									{
+										var key = keys[ki];
+										var value = self.bodyparameters[key];
+										
+										var input = iframeDoc.createElement("input");
+										input.type = "hidden";
+										input.name = key.toString();
+										input.value = value.toString();
+										form.appendChild(input);
+									}
+								}
+							}
+						}
+						window.setTimeout(self.iframePollCallbackName + "();", 2000);
+						form.submit();
+					}
 				}
 			}; 
 		})(this, this.iframeObject, this.iframePrepXHRPollCallbackName );
@@ -620,7 +891,31 @@ AjaxRequest.prototype.finishInitInstance = function() {
 		
 		this.iframeCallback = null;
 	}
-	this.initializing = false;
+	if(!AjaxRequest.hasiframe || !AjaxRequest.iframesupportsjavascriptvoidfunc) {
+		this.initializing = false;
+	} else {
+		this.iframeInitXHRCallbackName = "IFRAME_INIT_XHR" + AjaxRequest.iframeIdx.toString();
+		// TODO: add onerror to handle error.
+		window[this.iframeInitXHRCallbackName] = (function(self, iframeObject, fName) { 
+			return function () {
+				var iframeDoc = AjaxRequest.getIframeBody(AjaxRequest.getChildById(document.body, iframeObject.id));
+				if(AjaxRequest.hasReadyState) {
+					if(!iframeDoc || !iframeDoc.readyState || (iframeDoc && iframeDoc.readyState && iframeDoc.readyState != 'complete'/* && iframeDoc.readyState != 'interactive'*/ && iframeDoc.readyState != 4)) {
+						window.setTimeout(fName + "();", 2000);
+					} else {
+						self.initializing = false;
+					}
+				} else {
+					if(!iframeDoc || !iframeDoc.body) {
+						window.setTimeout(fName + "();", 2000);
+					} else {
+						self.initializing = false;
+					}
+				}
+			}; 
+		})(this, this.iframeObject, this.iframeInitXHRCallbackName );
+		window.setTimeout(this.iframeInitXHRCallbackName + "();", 2000);
+	}
 };
 
 AjaxRequest.prototype.msxml1ParseToTextIter = function(node) {
@@ -660,6 +955,12 @@ AjaxRequest.prototype.msxml1ParseToTextIter = function(node) {
 				for(var i = 0; i < node.children.length; i++) {
 					
 					out += this.msxml1ParseToTextIter(node.children.item(i));
+				}
+			}
+			if(node.childNodes) {
+				for(var i = 0; i < node.childNodes.length; i++) {
+					
+					out += this.msxml1ParseToTextIter(node.childNodes.item(i));
 				}
 			}
 			if(node.tagName) {
@@ -807,8 +1108,13 @@ AjaxRequest.prototype.finishLoadHTML = function(url, method, uriparameters, body
 		window.setTimeout(this.msxml1PollCallbackName + "();", 0);
 	} else if(this.iframeObject) {
 		//TODO: handle error.
-		
-		var iframe = document.getElementById(this.iframeObject.id);
+		this.headparams = headparams;
+		this.uriparameters = uriparameters;
+		this.bodyparameters = bodyparameters;
+		this.url = url;
+		this.method = method;
+	
+		var iframe = AjaxRequest.getChildById(document.body, this.iframeObject.id);
 		var formmethod="get";
 		if(method.toLowerCase() == "put" || method.toLowerCase() == "post" || method.toLowerCase() == "patch") {
 			 formmethod="post";
@@ -816,29 +1122,42 @@ AjaxRequest.prototype.finishLoadHTML = function(url, method, uriparameters, body
 		if(!/^[0-9A-Za-z-]*:?\/\//.test(url)) {
 			url = location.protocol + '//' + location.host + "/" + url;
 		}
+		this.iframeSrc = '<head>';
 		var src =	'javascript:void(' +
 						'(function(){' +
-							'var script = document.createElement("script");' +
-							'script.innerHTML = "(function() {' +
-								'document.open();' +
-								'document.domain=\\"' + document.domain + '\\";' +
-								'document.close();})();";' +
-							'document.write("' +
-								'<head>" + script.outerHTML + "';
+							'if(document) {' +
+								'var script="' +
+									'<script language=\\"javascript\\">' +
+										'(function() {' +
+											'document.open();' +
+											'document.domain=\\"' + document.domain + '\\";' +
+											'document.close();' + 
+										'})();' +
+									'<" + "' + "/" + '" + "script>' +
+								'";' +
+								'document.write("' +
+									'<head>" + script + "';
 		if(headparams) {
 			var keys = Object.keys(headparams);
 			for(var ki = 0; ki < keys.length; ki++)
 			{
 				var key = keys[ki];
 				var value = headparams[key];
-				src += '<meta http-equiv=\\"' + key.toString() + '\\" content=\\"' + value.toString() + '\\"/>';
+				src += 					'<meta http-equiv=\\"' + key.toString() + '\\" content=\\"' + value.toString() + '\\"/>';
+				this.iframeSrc +=		'<meta http-equiv="' + key.toString() + '" content="' + value.toString() + '"/>';
 			}
 		}
-		src +=					'</head>' +
-								'<body>' + 
-									'<form action=\\"' + url + '\\" method=\\"' + formmethod + '\\" target=\\"' + this.iframeObject.id + '\\">';
+		src +=						'</head>' +
+									'<body>' + 
+										//'<form action=\\"' + url + '\\" method=\\"' + formmethod + '\\" target=\\"' + this.iframeObject.id + '\\">';
+										'<form action=\\"' + url + '\\" method=\\"' + formmethod + '\\" target=\\"_self\\">';
+		this.iframeSrc +=			'</head>' +
+									'<body>' + 
+										//'<form action="' + url + '" method="' + formmethod + '" target="' + this.iframeObject.id + '">';
+										'<form action="' + url + '" method="' + formmethod + '" target="_self">';
 		if(method.toLowerCase() != "post" && method.toLowerCase() != "get") {
-			src += '<input type=\\"hidden\\" name=\\"_method\\" value=\\"' + method + '\\"/>';
+			src += 							'<input type=\\"hidden\\" name=\\"_method\\" value=\\"' + method + '\\"/>';
+			this.iframeSrc +=				'<input type="hidden" name="_method" value="' + method + '"/>';
 		}
 		if(uriparameters) {
 			var keys = Object.keys(uriparameters);
@@ -846,7 +1165,8 @@ AjaxRequest.prototype.finishLoadHTML = function(url, method, uriparameters, body
 			{
 				var key = keys[ki];
 				var value = uriparameters[key];
-				src += '<input type=\\"hidden\\" name=\\"' + key.toString() + '\\" value=\\"' + value.toString() + '\\"/>';
+				src += 						'<input type=\\"hidden\\" name=\\"' + key.toString() + '\\" value=\\"' + value.toString() + '\\"/>';
+				this.iframeSrc +=			'<input type="hidden" name="' + key.toString() + '" value="' + value.toString() + '"/>';
 			}
 		}
 		if(bodyparameters) {
@@ -855,21 +1175,29 @@ AjaxRequest.prototype.finishLoadHTML = function(url, method, uriparameters, body
 			{
 				var key = keys[ki];
 				var value = bodyparameters[key];
-				src += '<input type=\\"hidden\\" name=\\"' + key.toString() + '\\" value=\\"' + value.toString() + '\\"/>';
+				src += 						'<input type=\\"hidden\\" name=\\"' + key.toString() + '\\" value=\\"' + value.toString() + '\\"/>';
+				this.iframeSrc +=			'<input type="hidden" name="' + key.toString() + '" value="' + value.toString() + '"/>';
 			}
 		}
 		
-		src +=						'</form>' + 
-								'</body>' +
-							'");' +
+		src +=							'</form>' + 
+									'</body>' +
+								'");' +
+							'}' + 
 						'})()' +
 					')';
-		document.getElementById(this.iframeObject.id).src = src;
+		this.iframeSrc +=				'</form>' + 
+									'</body>';
+		if(AjaxRequest.iframesupportsjavascriptvoidfunc) {
+			AjaxRequest.getChildById(document.body, this.iframeObject.id).src = src;
+		} else {
+			AjaxRequest.getChildById(document.body, this.iframeObject.id).src = "about:blank";
+		}
 		
 		this.iframeCallback = callback;
 		//AjaxRequest.bindEvent(this.iframeObject, 'load', this.iframeLoadCallback);
-		//window.setTimeout(this.iframePollCallbackName + "();", 1000);
-		window.setTimeout(this.iframePrepXHRPollCallbackName + "();", 1000);
+		//window.setTimeout(this.iframePollCallbackName + "();", 2000);
+		window.setTimeout(this.iframePrepXHRPollCallbackName + "();", 2000);
 		
 		//this.iframeObject.src = url;
 	}
@@ -879,13 +1207,13 @@ AjaxRequest.prototype.loadHTML = function(url, method, uriparameters, bodyparame
 	window[this.loadHTMLCallbackName] = (function(self, cururl, curmethod, cururiparameters, curbodyparameters, curheadparams, curcallback) { 
 		return function() {
 			if(AjaxRequest.initializing || self.initializing) {
-				window.setTimeout(self.loadHTMLCallbackName + "();", 100);
+				window.setTimeout(self.loadHTMLCallbackName + "();", 2000);
 			} else {
 				self.finishLoadHTML(cururl, curmethod, cururiparameters, curbodyparameters, curheadparams, curcallback);
 			}
 		};
 	})(this, url, method, uriparameters, bodyparameters, headparams, callback);
-	window.setTimeout(this.loadHTMLCallbackName + "();", 100);
+	window.setTimeout(this.loadHTMLCallbackName + "();", 2000);
 };
 
 function AjaxRequest_testend() {
@@ -894,11 +1222,134 @@ function AjaxRequest_testend() {
 	} else {
 		window.onerror = null;
 	}
+	//alert("AjaxRequest.hasmsxml1:" + AjaxRequest.hasmsxml1);
+	//alert("AjaxRequest.hasmsxml1a:" + AjaxRequest.hasmsxml1a);
+	//alert("AjaxRequest.hasmsxml2:" + AjaxRequest.hasmsxml2);
+	//alert("AjaxRequest.hasmsxml3:" + AjaxRequest.hasmsxml3);
+	//alert("AjaxRequest.hasxmlhttprequest:" + AjaxRequest.hasxmlhttprequest);
+	//alert("AjaxRequest.hasiframe:" + AjaxRequest.hasiframe);
+	//alert("AjaxRequest.iframesupportsjavascriptvoidfunc:" + AjaxRequest.iframesupportsjavascriptvoidfunc);
+	//alert("AjaxRequest.hasReadyState:" + AjaxRequest.hasReadyState);
+	//alert("AjaxRequest.hasiframesupportsjavascriptloaded:" + AjaxRequest.hasiframesupportsjavascriptloaded);
 	AjaxRequest.initializing = false;
 }
 
+function AjaxRequest_testIFramePoll() {
+	AjaxRequest.numiframesupportsjavascriptvoidfunctest++;
+	if(AjaxRequest.hasiframe && AjaxRequest.testiframe && AjaxRequest.iframesupportsjavascriptvoidfunc && AjaxRequest.hasiframesupportsjavascriptloaded) {
+		window.setTimeout('AjaxRequest_testend();', 0);
+	} else if(AjaxRequest.numiframesupportsjavascriptvoidfunctest >= 10) {
+		AjaxRequest.hasiframe = false;
+		window.setTimeout('AjaxRequest_testend();', 0);
+	} else {
+		window.setTimeout('AjaxRequest_testIFramePoll();', 2000);
+	}
+		
+	if(AjaxRequest.hasiframe && AjaxRequest.testiframe) {
+		var iframeDoc = AjaxRequest.getIframeBody(AjaxRequest.getChildById(document.body, AjaxRequest.testiframe.id));
+		
+		if(iframeDoc) {
+			AjaxRequest.iframesupportsjavascriptvoidfunc = true;
+			
+			if(iframeDoc && iframeDoc.readyState) {
+				AjaxRequest.hasReadyState = true;
+				if(iframeDoc.readyState == 'complete'/* || iframeDoc.readyState == 'interactive'*/ || iframeDoc.readyState == 4) {
+					AjaxRequest.hasiframesupportsjavascriptloaded = true;
+				}
+			} else if(iframeDoc && iframeDoc.body) {
+				AjaxRequest.hasiframesupportsjavascriptloaded = true;
+			}
+		}
+	}
+}
+
+function AjaxRequest_testIFrame() {
+	window.setTimeout('AjaxRequest_testIFramePoll();', 2000);
+	
+	if(document && document.body && (document.body.innerHTML || document.body.innerHTML === "")) {
+		document.body.innerHTML += "\n" + '<iframe id="ajax_request_iframe_test" ' + 
+										'name="ajax_request_iframe_test" ' +
+										'hidden="true" style="display: none;" src=' + "'" +
+												'javascript:void(' + 
+													'(function(){' +
+														'var script = "' + 
+															'<script language=\\"javascript\\">' +
+																'(function() {' +
+																	'document.open();' +
+																	'document.domain=\\"' + document.domain + '\\";' +
+																	'document.close();' + 
+																'})();' +
+															'<" + "' + "/" + '" + "script>' +
+														'";' +
+														'if(document) {' +
+															'document.write("' + 
+																'<head>" + script + "</head>' + 
+																'<body>' + 
+																'</body>' +
+															'");' + 
+														'}' +
+													'})()' + 
+												')' + 
+											"'" + '>' +
+										'</iframe>';
+		var iframe = AjaxRequest.getChildById(document.body, 'ajax_request_iframe_test');
+		if(iframe && (iframe.src || iframe.src === "")) {
+			AjaxRequest.hasiframe = true;
+			AjaxRequest.testiframe = iframe;
+		}
+	}
+}
+
+function AjaxRequest_testOldIFramePoll() {
+	AjaxRequest.numiframesupportsjavascriptvoidfunctest++;
+	if(AjaxRequest.hasiframe && AjaxRequest.testiframe && AjaxRequest.hasiframesupportsjavascriptloaded) {
+		window.setTimeout('AjaxRequest_testend();', 0);
+	} else if(AjaxRequest.numiframesupportsjavascriptvoidfunctest >= 10) {
+		AjaxRequest.numiframesupportsjavascriptvoidfunctest = 0;
+		AjaxRequest.hasiframe = false;
+		window.setTimeout('AjaxRequest_testIFrame();', 0);
+	} else {
+		window.setTimeout('AjaxRequest_testOldIFramePoll();', 2000);
+	}
+		
+	if(AjaxRequest.hasiframe && AjaxRequest.testiframe) {
+		var iframeDoc = AjaxRequest.getIframeBody(AjaxRequest.getChildById(document.body, AjaxRequest.testiframe.id));
+		
+		if(iframeDoc) {
+			if(iframeDoc && iframeDoc.readyState) {
+				AjaxRequest.hasReadyState = true;
+				if(iframeDoc.readyState == 'complete'/* || iframeDoc.readyState == 'interactive'*/ || iframeDoc.readyState == 4) {
+					AjaxRequest.hasiframesupportsjavascriptloaded = true;
+				}
+			} else if(iframeDoc && iframeDoc.body) {
+				AjaxRequest.hasiframesupportsjavascriptloaded = true;
+			}
+		}
+	}
+}
+
+function AjaxRequest_testOldIFrame() {
+	window.setTimeout('AjaxRequest_testOldIFramePoll();', 2000);
+	
+	if(document && document.body && (document.body.innerHTML || document.body.innerHTML === "")) {
+		document.body.innerHTML += "\n" + '<iframe id="ajax_request_iframe_test_1_" ' + 
+										'name="ajax_request_iframe_test_1" ' +
+										'hidden="true" style="display: none;">' +
+										'</iframe>';
+		document.body.innerHTML += "\n" + '<iframe id="ajax_request_iframe_test_1" ' + 
+										'name="ajax_request_iframe_test_1" ' +
+										'hidden="true" style="display: none;">' +
+										'</iframe>';
+		var iframe = AjaxRequest.getChildById(document.body, 'ajax_request_iframe_test_1');
+		if(iframe && (iframe.src || iframe.src === "")) {
+			AjaxRequest.hasiframe = true;
+			AjaxRequest.testiframe = iframe;
+		}
+	}
+}
+
 function AjaxRequest_testXMLHttpRequest() {
-	window.setTimeout('AjaxRequest_testend();', 0);
+	window.setTimeout('AjaxRequest_testOldIFrame();', 0);
 	if(window.XMLHttpRequest) {
 		var xmlhttprequest = new XMLHttpRequest();
 		if(xmlhttprequest) {
@@ -960,6 +1411,12 @@ function AjaxRequest_testMSXML3Plus() {
   AjaxRequest.hasmsxml2 = false;
   AjaxRequest.hasmsxml3 = false;
   AjaxRequest.hasxmlhttprequest = false;
+  AjaxRequest.hasiframe = false;
+  AjaxRequest.iframesupportsjavascriptvoidfunc = false;
+  AjaxRequest.numiframesupportsjavascriptvoidfunctest = 0;
+  AjaxRequest.hasReadyState = false;
+  AjaxRequest.hasiframesupportsjavascriptloaded = false;
+  AjaxRequest.testiframe = null;
 
   // IE4 doesn't have try {} catch {},  because... IE... so use this janky workarround kludge instead...
   if(window && window.onerror) {
@@ -973,5 +1430,6 @@ function AjaxRequest_testMSXML3Plus() {
   };
 
   window.setTimeout('AjaxRequest_testMSXML3Plus();', 0);
+  //window.setTimeout('AjaxRequest_testOldIFrame();', 0);
   //window.setTimeout('AjaxRequest_testend();', 0);
 })();
